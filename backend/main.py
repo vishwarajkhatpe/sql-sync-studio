@@ -8,13 +8,14 @@ from app.db.database import get_db, engine, Base
 from app.api import auth  # IMPORT THE AUTH ROUTER
 from app.api import db_manager  # IMPORT THE NEW ROUTER
 from app.api import sync_manager  # NEW MANAGER
-
+from app.core.scheduler import start_scheduler # START THE BACKGROUND SCHEDULER ON APP LAUNCH
 
 # ---> UPDATED THIS SECTION TO IMPORT BOTH MODELS <---
 from app.models import user as user_model 
 from app.models import db_config as db_config_model
 from app.models import sync_rule as sync_rule_model # Registering the Sync Rule Model
 from app.models import extracted_payload as payload_model # Registering the Extracted Payload Model
+
 # Create tables
 Base.metadata.create_all(bind=engine)
 
@@ -22,6 +23,10 @@ app = FastAPI(
     title="SQL Sync Studio API",
     description="Backend for the SaaS Sandbox Platform"
 )
+
+@app.on_event("startup")
+def startup_event():
+    start_scheduler()
 
 app.add_middleware(
     CORSMiddleware,
