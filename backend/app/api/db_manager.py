@@ -67,3 +67,56 @@ def connect_and_save_database(
     db.commit()
     db.refresh(db_config)
     return db_config
+
+#Metadata Lister Route
+
+@router.get("/{config_id}/tables", response_model=list[str])
+def list_external_tables(
+    config_id: int,
+    db: Session = Depends(get_db),
+    current_user: user_model.User = Depends(get_current_user)
+):
+    """
+    Fetches a saved database configuration, verifies ownership, 
+    and returns a clean list of all tables present in that external database.
+    """
+    # 1. Fetch the stored database configuration from our primary app db
+    config = db.query(db_config_model.DatabaseConfig).filter(
+        db_config_model.DatabaseConfig.id == config_id
+    ).first()
+
+    if not config:
+        raise HTTPException(status_code=404, detail="Database configuration not found.")
+
+    # 2. Security Check: Ensure the logged-in user actually owns this configuration!
+    if config.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="You do not have permission to access this database configuration."
+        )
+
+    # 3. Build the connection string based on the stored data
+    if config.db_type.lower() == "mysql":
+        uri = f"mysql+pymysql://{config.username}:{config.password}@{config.host}:{config.port}/{config.database_name}"
+        query = text("SHOW TABLES")
+    elif config.db_type.lower() == "postgresql":
+        uri = f"postgresql+psycopg2://{config.username}:{config.password}@{config.host}:{config.port}/{config.database_name}"
+        # Standard SQL layout query to list tables in Postgres
+        query = text("SELECT table_name FROM information_schema.tables WHERE table_schema='public'")
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported database type.")
+
+    # 4. Connect to the client's external database dynamically and extract table names
+    try:
+        temp_engine = create_engine(uri, connect_args={"connect_timeout": 5} if config.db_type.lower() == "mysql" else {})
+        with temp_engine.connect() as conn:
+            result = conn.execute(query)
+            # Flatten the database rows into a clean array of strings
+            tables = [row[0] for row in result]
+        temp_engine.dispose()
+        return tables
+    except Exception as e:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Failed to fetch external tables: {str(e)}"
+        )
