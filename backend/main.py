@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.db.database import get_db, engine, Base
 from app.api import auth  # IMPORT THE AUTH ROUTER
 from app.api import db_manager  # IMPORT THE NEW ROUTER
+from app.api import sync_manager  # NEW MANAGER
 
 
 # ---> UPDATED THIS SECTION TO IMPORT BOTH MODELS <---
@@ -33,6 +34,7 @@ app.add_middleware(
 # INCLUDE THE ROUTER
 app.include_router(auth.router)
 app.include_router(db_manager.router) # REGISTER THE NEW ROUTER
+app.include_router(sync_manager.router) # MOUNTED THE ROUTER ENGINE BLOCK
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the SQL Sync Studio Backend!"}
