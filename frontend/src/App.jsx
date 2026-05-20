@@ -1,17 +1,46 @@
 import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from './context/AuthContext';
+
+// Page Imports
+import Login from './pages/Login';
+import Register from './pages/Register';
+import Dashboard from './pages/Dashboard';
+
+// A specialized wrapper component that guards routes.
+// If a non-logged-in user tries to manually type http://localhost:5173/ they get kicked out.
+const ProtectedRoute = ({ children }) => {
+  const { user } = useAuth();
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+  return children;
+};
 
 function App() {
   return (
-    <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-      <div className="bg-white p-8 rounded-lg shadow-md text-center max-w-md">
-        <h1 className="text-3xl font-bold text-blue-600 mb-2">
-          SQL Sync Studio
-        </h1>
-        <p className="text-gray-600">
-          Frontend architecture successfully connected with Tailwind CSS!
-        </p>
-      </div>
-    </div>
+    <AuthProvider>
+      <Router>
+        <Routes>
+          {/* Public Authentication Screens */}
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+
+          {/* Core App Screens - Explicitly Protected */}
+          <Route
+            path="/"
+            element={
+              <ProtectedRoute>
+                <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Catch-all fallback route to prevent dead space */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Router>
+    </AuthProvider>
   );
 }
 
