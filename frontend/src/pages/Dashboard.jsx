@@ -5,7 +5,7 @@ import API from '../services/api';
 function Dashboard() {
     const { user, logout } = useAuth();
 
-    // Form State Variables
+    // Connection Form State
     const [connectionName, setConnectionName] = useState('');
     const [dbType, setDbType] = useState('mysql');
     const [host, setHost] = useState('127.0.0.1');
@@ -14,13 +14,21 @@ function Dashboard() {
     const [password, setPassword] = useState('');
     const [databaseName, setDatabaseName] = useState('');
 
-    // Status State Variables
+    // Global Workspace Status State
+    const [activeConfigId, setActiveConfigId] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
     const [tables, setTables] = useState([]);
 
-    // Handle Dynamic Port Defaults when user flips database types
+    // Sync Modal Window UI State
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [selectedTable, setSelectedTable] = useState('');
+    const [syncFrequency, setSyncFrequency] = useState('manual');
+    const [syncStrategy, setSyncStrategy] = useState('full_load');
+    const [modalLoading, setModalLoading] = useState(false);
+    const [modalSuccess, setModalSuccess] = useState('');
+
     const handleDbTypeChange = (type) => {
         setDbType(type);
         setPort(type === 'mysql' ? 3306 : 5432);
@@ -32,6 +40,7 @@ function Dashboard() {
         setError('');
         setSuccess('');
         setTables([]);
+        setActiveConfigId(null);
 
         const payload = {
             connection_name: connectionName,
@@ -44,13 +53,12 @@ function Dashboard() {
         };
 
         try {
-            // 1. Submit the connection details to our FastAPI backend endpoint
             const response = await API.post('/databases/connect', payload);
             const savedConfigId = response.data.id;
+            setActiveConfigId(savedConfigId);
 
-            setSuccess(`Successfully registered configuration! Accessing metadata...`);
+            setSuccess(`Workspace registered! Accessing metadata layout...`);
 
-            // 2. Immediately fire a request to fetch the tables using the fresh configuration ID
             const tablesResponse = await API.get(`/databases/${savedConfigId}/tables`);
             setTables(tablesResponse.data);
             setSuccess(`Connected successfully! Fetched ${tablesResponse.data.length} tables.`);
@@ -61,8 +69,42 @@ function Dashboard() {
         }
     };
 
+    // Trigger modal display for a specific target table
+    const openSyncModal = (tableName) => {
+        setSelectedTable(tableName);
+        setSyncFrequency('manual');
+        setSyncStrategy('full_load');
+        setModalSuccess('');
+        setIsModalOpen(true);
+    };
+
+    const handleSaveSyncRule = async (e) => {
+        e.preventDefault();
+        setModalLoading(true);
+        setModalSuccess('');
+
+        const payload = {
+            table_name: selectedTable,
+            sync_frequency: syncFrequency,
+            sync_strategy: syncStrategy,
+            is_active: true
+        };
+
+        try {
+            await API.post(`/sync/${activeConfigId}/rules`, payload);
+            setModalSuccess(`Rule configured successfully for table '${selectedTable}'!`);
+            setTimeout(() => {
+                setIsModalOpen(false);
+            }, 1500);
+        } catch (err) {
+            alert(err.response?.data?.detail || 'Failed to save pipeline orchestration properties.');
+        } finally {
+            setModalLoading(false);
+        }
+    };
+
     return (
-        <div className="min-h-screen bg-gray-50">
+        <div className="min-h-screen bg-gray-50 relative">
             {/* Navigation Header */}
             <nav className="bg-white shadow-xs border-b border-gray-200">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -177,7 +219,7 @@ function Dashboard() {
                 <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 lg:col-span-2 flex flex-col">
                     <h3 className="text-lg font-bold text-gray-900 mb-2">Available Tables Schema Scanner</h3>
                     <p className="text-xs text-gray-500 mb-4">
-                        Once a connection finishes initialized parameters, the tables discovered inside the structural schema will parse below.
+                        Once a connection finishes initializing parameters, hover over any detected table structural schema to establish synchronization settings.
                     </p>
 
                     {tables.length === 0 ? (
@@ -190,22 +232,90 @@ function Dashboard() {
                             {tables.map((tableName, idx) => (
                                 <div
                                     key={idx}
-                                    className="p-3 border border-gray-200 rounded-md bg-gray-50 hover:bg-blue-50 hover:border-blue-200 transition-all flex items-center justify-between"
+                                    className="group p-3 border border-gray-200 rounded-md bg-gray-50 hover:bg-blue-50 hover:border-blue-200 transition-all flex items-center justify-between"
                                 >
                                     <div className="flex items-center space-x-2.5 truncate">
                                         <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0"></span>
                                         <span className="text-sm font-medium text-gray-700 truncate">{tableName}</span>
                                     </div>
-                                    <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-2 py-0.5 bg-white border border-gray-100 rounded">
-                                        Table
-                                    </span>
+                                    <button
+                                        onClick={() => openSyncModal(tableName)}
+                                        className="opacity-0 group-hover:opacity-100 px-2 py-1 text-xs font-semibold text-blue-600 bg-blue-100 hover:bg-blue-200 border border-blue-200 rounded transition-all cursor-pointer"
+                                    >
+                                        Configure Sync
+                                    </button>
                                 </div>
                             ))}
                         </div>
                     )}
                 </div>
-
             </main>
+
+            {/* INTERACTIVE POPUP MODAL DIALOG OVERLAY */}
+            {isModalOpen && (
+                <div className="fixed inset-0 z-50 overflow-y-auto bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+                    <div className="bg-white rounded-lg shadow-xl border border-gray-200 max-w-md w-full overflow-hidden transition-all transform animate-in fade-in zoom-in-95 duration-200">
+                        <div className="px-6 py-4 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
+                            <h3 className="text-base font-bold text-gray-900">
+                                Sync Settings: <span className="text-blue-600 font-mono text-sm">{selectedTable}</span>
+                            </h3>
+                            <button
+                                onClick={() => setIsModalOpen(false)}
+                                className="text-gray-400 hover:text-gray-500 font-bold text-lg cursor-pointer"
+                            >
+                                &times;
+                            </button>
+                        </div>
+
+                        <form onSubmit={handleSaveSyncRule} className="p-6 space-y-4">
+                            {modalSuccess && (
+                                <div className="bg-green-50 border border-green-200 text-green-600 rounded-md p-3 text-xs">
+                                    {modalSuccess}
+                                </div>
+                            )}
+
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Synchronization Frequency</label>
+                                <select
+                                    className="mt-1.5 block w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-hidden focus:ring-1 focus:ring-blue-500"
+                                    value={syncFrequency} onChange={(e) => setSyncFrequency(e.target.value)}
+                                >
+                                    <option value="manual">Manual Trigger Only</option>
+                                    <option value="realtime">Real-time Stream Integration</option>
+                                    <option value="hourly">Scheduled Execution (Hourly)</option>
+                                    <option value="daily">Scheduled Execution (Daily)</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Pipeline Loading Strategy</label>
+                                <select
+                                    className="mt-1.5 block w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-hidden focus:ring-1 focus:ring-blue-500"
+                                    value={syncStrategy} onChange={(e) => setSyncStrategy(e.target.value)}
+                                >
+                                    <option value="full_load">Full Overwrite Extract (Truncate & Replace)</option>
+                                    <option value="incremental">Incremental Delta Sync (Append Missing Rows Only)</option>
+                                </select>
+                            </div>
+
+                            <div className="pt-2 flex justify-end space-x-2">
+                                <button
+                                    type="button" onClick={() => setIsModalOpen(false)}
+                                    className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-colors cursor-pointer"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit" disabled={modalLoading}
+                                    className="px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors cursor-pointer disabled:opacity-50"
+                                >
+                                    {modalLoading ? 'Saving Rules...' : 'Save Sync Architecture'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
