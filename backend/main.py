@@ -7,8 +7,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.db.database import get_db, engine, Base
 from app.api import auth  # IMPORT THE AUTH ROUTER
 
-# fix: Table 'saas_platform.users' doesn't exist
-from app.models import user as user_model
+# ---> UPDATED THIS SECTION TO IMPORT BOTH MODELS <---
+from app.models import user as user_model 
+from app.models import db_config as db_config_model
 
 # Create tables
 Base.metadata.create_all(bind=engine)
