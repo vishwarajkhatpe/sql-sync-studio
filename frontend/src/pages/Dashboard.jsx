@@ -21,9 +21,13 @@ function Dashboard() {
     const [success, setSuccess] = useState('');
     const [tables, setTables] = useState([]);
 
+    // Active Workspace Inspection State
+    const [selectedTable, setSelectedTable] = useState('');
+    const [extractedData, setExtractedData] = useState([]);
+    const [extractionLoading, setExtractionLoading] = useState(false);
+
     // Sync Modal Window UI State
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [selectedTable, setSelectedTable] = useState('');
     const [syncFrequency, setSyncFrequency] = useState('manual');
     const [syncStrategy, setSyncStrategy] = useState('full_load');
     const [modalLoading, setModalLoading] = useState(false);
@@ -41,6 +45,8 @@ function Dashboard() {
         setSuccess('');
         setTables([]);
         setActiveConfigId(null);
+        setSelectedTable('');
+        setExtractedData([]);
 
         const payload = {
             connection_name: connectionName,
@@ -69,8 +75,24 @@ function Dashboard() {
         }
     };
 
-    // Trigger modal display for a specific target table
-    const openSyncModal = (tableName) => {
+    // Trigger manual extraction pipeline execution for the active table selection
+    const handleTriggerExtraction = async (tableName) => {
+        setExtractionLoading(true);
+        setSelectedTable(tableName);
+        setExtractedData([]);
+
+        try {
+            const response = await API.post(`/sync/${activeConfigId}/extract/${tableName}`);
+            setExtractedData(response.data.data);
+        } catch (err) {
+            alert(err.response?.data?.detail || 'Failed to extract records from target table.');
+        } finally {
+            setExtractionLoading(false);
+        }
+    };
+
+    const openSyncModal = (e, tableName) => {
+        e.stopPropagation(); // Stop parent row selection click from triggering
         setSelectedTable(tableName);
         setSyncFrequency('manual');
         setSyncStrategy('full_load');
@@ -132,7 +154,7 @@ function Dashboard() {
             <main className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
 
                 {/* Left Side Column: Connection Panel Form */}
-                <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 lg:col-span-1">
+                <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 lg:col-span-1 h-fit">
                     <h3 className="text-lg font-bold text-gray-900 mb-4">Connect Data Source</h3>
 
                     {error && <div className="mb-4 bg-red-50 border border-red-200 text-red-600 rounded-md p-3 text-xs">{error}</div>}
@@ -215,39 +237,101 @@ function Dashboard() {
                     </form>
                 </div>
 
-                {/* Right Side Column: Dynamic Metadata Output Terminal */}
-                <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 lg:col-span-2 flex flex-col">
-                    <h3 className="text-lg font-bold text-gray-900 mb-2">Available Tables Schema Scanner</h3>
-                    <p className="text-xs text-gray-500 mb-4">
-                        Once a connection finishes initializing parameters, hover over any detected table structural schema to establish synchronization settings.
-                    </p>
+                {/* Right Side Column: Table Scanner and Data Extract Grid Panel */}
+                <div className="lg:col-span-2 space-y-6 flex flex-col">
 
-                    {tables.length === 0 ? (
-                        <div className="flex-1 border-2 border-dashed border-gray-200 rounded-lg flex flex-col items-center justify-center p-12 text-center">
-                            <p className="text-sm font-medium text-gray-400">No active connection database schema loaded.</p>
-                            <p className="text-xs text-gray-400 mt-1">Submit configuration parameters on the left pane to establish connection stream.</p>
-                        </div>
-                    ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[450px] overflow-y-auto pr-2">
-                            {tables.map((tableName, idx) => (
-                                <div
-                                    key={idx}
-                                    className="group p-3 border border-gray-200 rounded-md bg-gray-50 hover:bg-blue-50 hover:border-blue-200 transition-all flex items-center justify-between"
-                                >
-                                    <div className="flex items-center space-x-2.5 truncate">
-                                        <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0"></span>
-                                        <span className="text-sm font-medium text-gray-700 truncate">{tableName}</span>
-                                    </div>
-                                    <button
-                                        onClick={() => openSyncModal(tableName)}
-                                        className="opacity-0 group-hover:opacity-100 px-2 py-1 text-xs font-semibold text-blue-600 bg-blue-100 hover:bg-blue-200 border border-blue-200 rounded transition-all cursor-pointer"
+                    {/* Top Half: Schema Table Node Selection */}
+                    <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+                        <h3 className="text-lg font-bold text-gray-900 mb-2">Available Tables Schema Scanner</h3>
+                        <p className="text-xs text-gray-500 mb-4">
+                            Click on a table block to dynamically interrogate data rows, or open settings to adjust pipeline sync properties.
+                        </p>
+
+                        {tables.length === 0 ? (
+                            <div className="border-2 border-dashed border-gray-200 rounded-lg flex flex-col items-center justify-center p-12 text-center">
+                                <p className="text-sm font-medium text-gray-400">No active connection database schema loaded.</p>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[220px] overflow-y-auto pr-2">
+                                {tables.map((tableName, idx) => (
+                                    <div
+                                        key={idx}
+                                        onClick={() => handleTriggerExtraction(tableName)}
+                                        className={`group p-3 border rounded-md cursor-pointer transition-all flex items-center justify-between ${selectedTable === tableName
+                                                ? 'bg-blue-50 border-blue-400 ring-1 ring-blue-400'
+                                                : 'bg-gray-50 border-gray-200 hover:bg-blue-50 hover:border-blue-200'
+                                            }`}
                                     >
-                                        Configure Sync
-                                    </button>
-                                </div>
-                            ))}
+                                        <div className="flex items-center space-x-2.5 truncate">
+                                            <span className={`w-2 h-2 rounded-full shrink-0 ${selectedTable === tableName ? 'bg-blue-600 animate-pulse' : 'bg-blue-500'}`}></span>
+                                            <span className="text-sm font-medium text-gray-700 truncate">{tableName}</span>
+                                        </div>
+                                        <button
+                                            onClick={(e) => openSyncModal(e, tableName)}
+                                            className="opacity-0 group-hover:opacity-100 px-2 py-1 text-xs font-semibold text-blue-600 bg-blue-100 hover:bg-blue-200 border border-blue-200 rounded transition-all cursor-pointer"
+                                        >
+                                            Configure Sync
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Bottom Half: Live Extraction Spreadsheet Grid Panel */}
+                    <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 flex-1 min-h-[300px] flex flex-col">
+                        <div className="flex justify-between items-center mb-4">
+                            <div>
+                                <h3 className="text-lg font-bold text-gray-900">Live Data Extraction Terminal</h3>
+                                {selectedTable && (
+                                    <p className="text-xs text-gray-500 mt-0.5">
+                                        Inspecting dynamic runtime contents for table: <span className="font-mono font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">{selectedTable}</span>
+                                    </p>
+                                )}
+                            </div>
+                            {selectedTable && (
+                                <span className="text-xs font-semibold bg-gray-100 border border-gray-200 text-gray-700 px-2.5 py-1 rounded-md">
+                                    {extractedData.length} Records Found
+                                </span>
+                            )}
                         </div>
-                    )}
+
+                        {extractionLoading ? (
+                            <div className="flex-1 flex flex-col items-center justify-center p-12">
+                                <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                                <p className="text-sm font-medium text-gray-500 mt-3 animate-pulse">Running optimized SELECT stream extraction sequence...</p>
+                            </div>
+                        ) : extractedData.length > 0 ? (
+                            <div className="flex-1 overflow-x-auto border border-gray-200 rounded-lg max-h-[350px]">
+                                <table className="min-w-full divide-y divide-gray-200 text-left text-sm">
+                                    <thead className="bg-gray-50 sticky top-0 font-semibold text-gray-700 border-b border-gray-200">
+                                        <tr>
+                                            {Object.keys(extractedData[0]).map((header) => (
+                                                <th key={header} className="px-4 py-3 font-mono text-xs uppercase tracking-wider bg-gray-50">{header}</th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody className="bg-white divide-y divide-gray-200 text-gray-600 font-medium">
+                                        {extractedData.map((row, rowIdx) => (
+                                            <tr key={rowIdx} className="hover:bg-gray-50/70 transition-colors">
+                                                {Object.values(row).map((val, cellIdx) => (
+                                                    <th key={cellIdx} className="px-4 py-2.5 font-normal truncate max-w-[200px]">
+                                                        {val === null ? <span className="text-gray-300 italic text-xs">NULL</span> : String(val)}
+                                                    </th>
+                                                ))}
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ) : (
+                            <div className="flex-1 border-2 border-dashed border-gray-100 rounded-lg flex flex-col items-center justify-center p-12 text-center bg-gray-50/40">
+                                <p className="text-sm font-medium text-gray-400">No active table stream rendering.</p>
+                                <p className="text-xs text-gray-400 mt-1">Select any loaded schema table box node above to trigger immediate extraction preview.</p>
+                            </div>
+                        )}
+                    </div>
+
                 </div>
             </main>
 
@@ -259,25 +343,16 @@ function Dashboard() {
                             <h3 className="text-base font-bold text-gray-900">
                                 Sync Settings: <span className="text-blue-600 font-mono text-sm">{selectedTable}</span>
                             </h3>
-                            <button
-                                onClick={() => setIsModalOpen(false)}
-                                className="text-gray-400 hover:text-gray-500 font-bold text-lg cursor-pointer"
-                            >
-                                &times;
-                            </button>
+                            <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-500 font-bold text-lg cursor-pointer">&times;</button>
                         </div>
 
                         <form onSubmit={handleSaveSyncRule} className="p-6 space-y-4">
-                            {modalSuccess && (
-                                <div className="bg-green-50 border border-green-200 text-green-600 rounded-md p-3 text-xs">
-                                    {modalSuccess}
-                                </div>
-                            )}
+                            {modalSuccess && <div className="bg-green-50 border border-green-200 text-green-600 rounded-md p-3 text-xs">{modalSuccess}</div>}
 
                             <div>
                                 <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Synchronization Frequency</label>
                                 <select
-                                    className="mt-1.5 block w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-hidden focus:ring-1 focus:ring-blue-500"
+                                    className="mt-1.5 block w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
                                     value={syncFrequency} onChange={(e) => setSyncFrequency(e.target.value)}
                                 >
                                     <option value="manual">Manual Trigger Only</option>
@@ -290,7 +365,7 @@ function Dashboard() {
                             <div>
                                 <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider">Pipeline Loading Strategy</label>
                                 <select
-                                    className="mt-1.5 block w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-hidden focus:ring-1 focus:ring-blue-500"
+                                    className="mt-1.5 block w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
                                     value={syncStrategy} onChange={(e) => setSyncStrategy(e.target.value)}
                                 >
                                     <option value="full_load">Full Overwrite Extract (Truncate & Replace)</option>
