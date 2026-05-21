@@ -1,16 +1,30 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, desc
+from decimal import Decimal
+from datetime import date, datetime
 
 from app.db.database import get_db
 from app.schemas import sync_rule as schema
 from app.models import sync_rule as model
 from app.models import db_config as db_model
+from app.models import extracted_payload as payload_model
 from app.api.deps import get_current_user
 from app.models import user as user_model
-from app.models import extracted_payload as payload_model # NEW MODEL FOR STORING EXTRACTED DATA SNAPSHOTS
 
 router = APIRouter(prefix="/sync", tags=["Sync Pipeline Manager"])
+
+def sanitize_record(record: dict) -> dict:
+    """Converts non-JSON serializable types into native JSON types."""
+    sanitized = {}
+    for key, value in record.items():
+        if isinstance(value, Decimal):
+            sanitized[key] = float(value)
+        elif isinstance(value, (datetime, date)):
+            sanitized[key] = value.isoformat()
+        else:
+            sanitized[key] = value
+    return sanitized
 
 @router.post("/{config_id}/rules", response_model=schema.SyncRuleResponse)
 def create_sync_rule(
@@ -19,30 +33,17 @@ def create_sync_rule(
     db: Session = Depends(get_db),
     current_user: user_model.User = Depends(get_current_user)
 ):
-    """
-    Saves a specific synchronization orchestrator rule for an external database table.
-    Verifies that the current logged-in user owns the targeted configuration space.
-    """
-    # 1. Verify that the targeted database configuration workspace exists
+    """Saves a specific synchronization orchestrator rule for an external database table."""
     config = db.query(db_model.DatabaseConfig).filter(db_model.DatabaseConfig.id == config_id).first()
-    if not config:
-        raise HTTPException(status_code=404, detail="Database workspace configuration not found.")
+    if not config or config.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access Denied.")
 
-    # 2. Security isolation boundary check
-    if config.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access Denied: You do not own this database workspace profile."
-        )
-
-    # 3. Check if a rule already exists for this specific table in this config workspace
     existing_rule = db.query(model.SyncRule).filter(
         model.SyncRule.config_id == config_id,
         model.SyncRule.table_name == rule_data.table_name
     ).first()
 
     if existing_rule:
-        # Update existing rule parameters instead of duplicating rows
         existing_rule.sync_frequency = rule_data.sync_frequency
         existing_rule.sync_strategy = rule_data.sync_strategy
         existing_rule.is_active = rule_data.is_active
@@ -50,7 +51,6 @@ def create_sync_rule(
         db.refresh(existing_rule)
         return existing_rule
 
-    # 4. Map schema data to internal persistence model and save
     new_rule = model.SyncRule(
         config_id=config_id,
         table_name=rule_data.table_name,
@@ -63,19 +63,16 @@ def create_sync_rule(
     db.refresh(new_rule)
     return new_rule
 
-
 @router.get("/{config_id}/rules", response_model=list[schema.SyncRuleResponse])
 def get_workspace_sync_rules(
     config_id: int,
     db: Session = Depends(get_db),
     current_user: user_model.User = Depends(get_current_user)
 ):
-    """
-    Fetches all synchronization rules defined under a specific active database profile.
-    """
+    """Fetches all synchronization rules defined under a specific active database profile."""
     config = db.query(db_model.DatabaseConfig).filter(db_model.DatabaseConfig.id == config_id).first()
     if not config or config.user_id != current_user.id:
-        raise HTTPException(status_code=404, detail="Database profile workspace not found or inaccessible.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access Denied.")
 
     rules = db.query(model.SyncRule).filter(model.SyncRule.config_id == config_id).all()
     return rules
@@ -89,8 +86,8 @@ def extract_table_data(
 ):
     """
     Core Extraction & Ingestion Engine: Connects to external database,
-    downloads records into JSON, SAVES a snapshot to the internal Data Lake,
-    and returns the payload.
+    downloads records into JSON, sanitizes Decimal types, SAVES a snapshot 
+    to the internal Data Lake, and returns the payload.
     """
     config = db.query(db_model.DatabaseConfig).filter(db_model.DatabaseConfig.id == config_id).first()
     if not config or config.user_id != current_user.id:
@@ -110,15 +107,17 @@ def extract_table_data(
             query = text(f"SELECT * FROM `{table_name}`" if config.db_type.lower() == "mysql" else f'SELECT * FROM "{table_name}"')
             result = conn.execute(query)
             columns = result.keys()
-            extracted_records = [dict(zip(columns, row)) for row in result]
+            raw_records = [dict(zip(columns, row)) for row in result]
         temp_engine.dispose()
         
+        # ---> SANITIZE THE RECORDS FOR JSON <---
+        clean_records = [sanitize_record(record) for record in raw_records]
+        
         # 2. INGEST: Save the snapshot to our Data Lake Vault
-        # We wrap the records in a dictionary to ensure strict JSON formatting
         snapshot = payload_model.ExtractedPayload(
             config_id=config_id,
             table_name=table_name,
-            raw_data={"records": extracted_records} 
+            raw_data={"records": clean_records} 
         )
         db.add(snapshot)
         db.commit()
@@ -129,10 +128,39 @@ def extract_table_data(
             "status": "success",
             "snapshot_id": snapshot.id,
             "table": table_name,
-            "record_count": len(extracted_records),
-            "data": extracted_records
+            "record_count": len(clean_records),
+            "data": clean_records
         }
         
     except Exception as e:
-        db.rollback() # Safety net: undo changes if anything fails
+        db.rollback()
         raise HTTPException(status_code=400, detail=f"Extraction & Ingestion failed: {str(e)}")
+
+@router.get("/{config_id}/history")
+def get_extraction_history(
+    config_id: int,
+    db: Session = Depends(get_db),
+    current_user: user_model.User = Depends(get_current_user)
+):
+    """Fetches the 10 most recent sync snapshots from the Data Lake."""
+    config = db.query(db_model.DatabaseConfig).filter(db_model.DatabaseConfig.id == config_id).first()
+    if not config or config.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access Denied.")
+
+    recent_snapshots = db.query(payload_model.ExtractedPayload)\
+        .filter(payload_model.ExtractedPayload.config_id == config_id)\
+        .order_by(desc(payload_model.ExtractedPayload.extracted_at))\
+        .limit(10).all()
+
+    history = []
+    for snap in recent_snapshots:
+        record_count = len(snap.raw_data.get("records", [])) if isinstance(snap.raw_data, dict) else 0
+        
+        history.append({
+            "id": snap.id,
+            "table_name": snap.table_name,
+            "record_count": record_count,
+            "extracted_at": snap.extracted_at
+        })
+
+    return {"status": "success", "history": history}

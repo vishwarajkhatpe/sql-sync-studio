@@ -1,9 +1,21 @@
 import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import create_engine, text
-
+from decimal import Decimal
+from datetime import date, datetime
 from app.db.database import SessionLocal
 from app.models import sync_rule, db_config, extracted_payload
+
+def sanitize_record(record: dict) -> dict:
+    sanitized = {}
+    for key, value in record.items():
+        if isinstance(value, Decimal):
+            sanitized[key] = float(value)
+        elif isinstance(value, (datetime, date)):
+            sanitized[key] = value.isoformat()
+        else:
+            sanitized[key] = value
+    return sanitized
 
 # Set up logging so we can see the ghost worker in the terminal!
 logging.basicConfig(level=logging.INFO)
@@ -14,7 +26,7 @@ def execute_automated_pipeline():
     This function is our Ghost Worker. It wakes up, finds active sync rules,
     connects to external databases, and saves snapshots automatically.
     """
-    logger.info("🤖 Ghost Worker Waking Up: Checking for active sync rules...")
+    logger.info("Ghost Worker Waking Up: Checking for active sync rules...")
     
     # Open a private database session for the background thread
     db = SessionLocal()
@@ -32,7 +44,7 @@ def execute_automated_pipeline():
             if not config:
                 continue
 
-            logger.info(f"⚡ Starting automated sync for table: {rule.table_name}")
+            logger.info(f"Starting automated sync for table: {rule.table_name}")
 
             # Build the dynamic connection URI
             if config.db_type.lower() == "mysql":
@@ -49,20 +61,22 @@ def execute_automated_pipeline():
                     columns = result.keys()
                     extracted_records = [dict(zip(columns, row)) for row in result]
                 temp_engine.dispose()
+                
+                clean_records = [sanitize_record(record) for record in raw_records]
 
                 # 2. INGEST
                 snapshot = extracted_payload.ExtractedPayload(
                     config_id=config.id,
                     table_name=rule.table_name,
-                    raw_data={"records": extracted_records}
+                    raw_data={"records": clean_records}
                 )
                 db.add(snapshot)
                 db.commit()
                 
-                logger.info(f"✅ SUCCESS: Saved {len(extracted_records)} records from '{rule.table_name}' to the Data Lake.")
+                logger.info(f"SUCCESS: Saved {len(extracted_records)} records from '{rule.table_name}' to the Data Lake.")
             
             except Exception as e:
-                logger.error(f"❌ FAILED to sync '{rule.table_name}': {str(e)}")
+                logger.error(f"FAILED to sync '{rule.table_name}': {str(e)}")
 
     finally:
         # Always securely close the database session when the worker is done
@@ -77,4 +91,4 @@ def start_scheduler():
     scheduler.add_job(execute_automated_pipeline, 'interval', minutes=1)
     
     scheduler.start()
-    logger.info("⏱️ Background Scheduler Engine Initialized!")
+    logger.info("Background Scheduler Engine Initialized!")

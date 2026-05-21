@@ -26,6 +26,9 @@ function Dashboard() {
     const [extractedData, setExtractedData] = useState([]);
     const [extractionLoading, setExtractionLoading] = useState(false);
 
+    // Phase 7: Telemetry History State
+    const [syncHistory, setSyncHistory] = useState([]);
+
     // Sync Modal Window UI State
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [syncFrequency, setSyncFrequency] = useState('manual');
@@ -47,6 +50,7 @@ function Dashboard() {
         setActiveConfigId(null);
         setSelectedTable('');
         setExtractedData([]);
+        setSyncHistory([]);
 
         const payload = {
             connection_name: connectionName,
@@ -65,8 +69,14 @@ function Dashboard() {
 
             setSuccess(`Workspace registered! Accessing metadata layout...`);
 
+            // Fetch Tables
             const tablesResponse = await API.get(`/databases/${savedConfigId}/tables`);
             setTables(tablesResponse.data);
+
+            // Fetch Telemetry History
+            const historyResponse = await API.get(`/sync/${savedConfigId}/history`);
+            setSyncHistory(historyResponse.data.history);
+
             setSuccess(`Connected successfully! Fetched ${tablesResponse.data.length} tables.`);
         } catch (err) {
             setError(err.response?.data?.detail || 'Failed to establish database connection link.');
@@ -84,6 +94,10 @@ function Dashboard() {
         try {
             const response = await API.post(`/sync/${activeConfigId}/extract/${tableName}`);
             setExtractedData(response.data.data);
+
+            // Refresh history log after manual extraction
+            const historyResponse = await API.get(`/sync/${activeConfigId}/history`);
+            setSyncHistory(historyResponse.data.history);
         } catch (err) {
             alert(err.response?.data?.detail || 'Failed to extract records from target table.');
         } finally {
@@ -154,7 +168,7 @@ function Dashboard() {
             <main className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
 
                 {/* Left Side Column: Connection Panel Form */}
-                <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 lg:col-span-1 h-fit">
+                <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 lg:col-span-1 lg:h-fit lg:sticky lg:top-8">
                     <h3 className="text-lg font-bold text-gray-900 mb-4">Connect Data Source</h3>
 
                     {error && <div className="mb-4 bg-red-50 border border-red-200 text-red-600 rounded-md p-3 text-xs">{error}</div>}
@@ -237,10 +251,10 @@ function Dashboard() {
                     </form>
                 </div>
 
-                {/* Right Side Column: Table Scanner and Data Extract Grid Panel */}
-                <div className="lg:col-span-2 space-y-6 flex flex-col">
+                {/* Right Side Column: Table Scanner, Data Grid, and Telemetry */}
+                <div className="lg:col-span-2 flex flex-col space-y-6">
 
-                    {/* Top Half: Schema Table Node Selection */}
+                    {/* Top Panel: Schema Table Node Selection */}
                     <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
                         <h3 className="text-lg font-bold text-gray-900 mb-2">Available Tables Schema Scanner</h3>
                         <p className="text-xs text-gray-500 mb-4">
@@ -258,8 +272,8 @@ function Dashboard() {
                                         key={idx}
                                         onClick={() => handleTriggerExtraction(tableName)}
                                         className={`group p-3 border rounded-md cursor-pointer transition-all flex items-center justify-between ${selectedTable === tableName
-                                                ? 'bg-blue-50 border-blue-400 ring-1 ring-blue-400'
-                                                : 'bg-gray-50 border-gray-200 hover:bg-blue-50 hover:border-blue-200'
+                                            ? 'bg-blue-50 border-blue-400 ring-1 ring-blue-400'
+                                            : 'bg-gray-50 border-gray-200 hover:bg-blue-50 hover:border-blue-200'
                                             }`}
                                     >
                                         <div className="flex items-center space-x-2.5 truncate">
@@ -278,8 +292,8 @@ function Dashboard() {
                         )}
                     </div>
 
-                    {/* Bottom Half: Live Extraction Spreadsheet Grid Panel */}
-                    <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 flex-1 min-h-[300px] flex flex-col">
+                    {/* Middle Panel: Live Extraction Spreadsheet Grid */}
+                    <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 min-h-[300px] flex flex-col">
                         <div className="flex justify-between items-center mb-4">
                             <div>
                                 <h3 className="text-lg font-bold text-gray-900">Live Data Extraction Terminal</h3>
@@ -328,6 +342,47 @@ function Dashboard() {
                             <div className="flex-1 border-2 border-dashed border-gray-100 rounded-lg flex flex-col items-center justify-center p-12 text-center bg-gray-50/40">
                                 <p className="text-sm font-medium text-gray-400">No active table stream rendering.</p>
                                 <p className="text-xs text-gray-400 mt-1">Select any loaded schema table box node above to trigger immediate extraction preview.</p>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Bottom Panel: Telemetry Activity Log (NEW!) */}
+                    <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-bold text-gray-900">Pipeline Activity Log</h3>
+                            <button
+                                onClick={async () => {
+                                    if (activeConfigId) {
+                                        const res = await API.get(`/sync/${activeConfigId}/history`);
+                                        setSyncHistory(res.data.history);
+                                    }
+                                }}
+                                className="text-xs text-blue-600 hover:text-blue-800 font-medium cursor-pointer flex items-center gap-1"
+                            >
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                                Refresh Log
+                            </button>
+                        </div>
+
+                        {syncHistory.length === 0 ? (
+                            <div className="p-4 bg-gray-50 border border-gray-100 rounded-md text-center">
+                                <p className="text-xs text-gray-500 italic">No sync history recorded yet. Run a manual extraction or wait for the automated worker.</p>
+                            </div>
+                        ) : (
+                            <div className="space-y-3 max-h-[250px] overflow-y-auto pr-2">
+                                {syncHistory.map((log) => (
+                                    <div key={log.id} className="flex items-center justify-between text-sm p-3 bg-gray-50 border border-gray-100 rounded-md hover:border-blue-100 transition-colors">
+                                        <div className="flex items-center space-x-3">
+                                            <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]"></div>
+                                            <span className="font-medium text-gray-700">Snapshot #{log.id}</span>
+                                            <span className="font-mono text-blue-600 bg-blue-100 px-2 py-0.5 rounded text-xs">{log.table_name}</span>
+                                        </div>
+                                        <div className="flex items-center space-x-4 text-xs text-gray-500">
+                                            <span className="bg-white px-2 py-1 rounded border border-gray-200">{log.record_count} Records</span>
+                                            <span className="font-medium">{new Date(log.extracted_at).toLocaleTimeString()}</span>
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
                         )}
                     </div>
