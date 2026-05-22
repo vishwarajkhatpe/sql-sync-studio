@@ -5,8 +5,11 @@ from sqlalchemy import create_engine, text
 from app.db.database import get_db
 from app.schemas import db_config as db_schema
 from app.models import db_config as db_config_model
-from app.api.deps import get_current_user  # Import our bouncer
+from app.api.deps import get_current_user  
 from app.models import user as user_model
+
+# ---> NEW: Import Security Utilities <---
+from app.core.security import encrypt_db_password, decrypt_db_password
 
 router = APIRouter(prefix="/databases", tags=["Database Manager"])
 
@@ -31,7 +34,7 @@ def verify_external_connection(config: db_schema.DatabaseConfigCreate):
 @router.post("/test-connection")
 def test_connection(
     config: db_schema.DatabaseConfigCreate, 
-    current_user: user_model.User = Depends(get_current_user) # Protected!
+    current_user: user_model.User = Depends(get_current_user) 
 ):
     """Verifies connection configurations. (Requires authorization token)"""
     verify_external_connection(config)
@@ -41,24 +44,25 @@ def test_connection(
 def connect_and_save_database(
     config: db_schema.DatabaseConfigCreate,
     db: Session = Depends(get_db),
-    current_user: user_model.User = Depends(get_current_user) # Protected!
+    current_user: user_model.User = Depends(get_current_user) 
 ):
     """
     Tests the connection, and if successful, saves the configuration 
     permanently linked to the logged-in user.
     """
-    # 1. Verify it works first
+    # 1. Verify it works first (Uses the raw frontend password temporarily)
     verify_external_connection(config)
 
     # 2. Map the configuration fields to our database model
     db_config = db_config_model.DatabaseConfig(
-        user_id=current_user.id, # Securely pull ID from token, not user input!
+        user_id=current_user.id, 
         connection_name=config.connection_name,
         db_type=config.db_type,
         host=config.host,
         port=config.port,
         username=config.username,
-        password=config.password,
+        # ---> NEW: ENCRYPT BEFORE SAVING <---
+        password=encrypt_db_password(config.password),
         database_name=config.database_name
     )
 
@@ -69,7 +73,6 @@ def connect_and_save_database(
     return db_config
 
 #Metadata Lister Route
-
 @router.get("/{config_id}/tables", response_model=list[str])
 def list_external_tables(
     config_id: int,
@@ -95,13 +98,18 @@ def list_external_tables(
             detail="You do not have permission to access this database configuration."
         )
 
-    # 3. Build the connection string based on the stored data
+    # ---> NEW: DECRYPT THE PASSWORD IN MEMORY <---
+    try:
+        real_password = decrypt_db_password(config.password)
+    except ValueError:
+        raise HTTPException(status_code=500, detail="Security Fault: Unable to decrypt database credentials.")
+
+    # 3. Build the connection string based on the decrypted data
     if config.db_type.lower() == "mysql":
-        uri = f"mysql+pymysql://{config.username}:{config.password}@{config.host}:{config.port}/{config.database_name}"
+        uri = f"mysql+pymysql://{config.username}:{real_password}@{config.host}:{config.port}/{config.database_name}"
         query = text("SHOW TABLES")
     elif config.db_type.lower() == "postgresql":
-        uri = f"postgresql+psycopg2://{config.username}:{config.password}@{config.host}:{config.port}/{config.database_name}"
-        # Standard SQL layout query to list tables in Postgres
+        uri = f"postgresql+psycopg2://{config.username}:{real_password}@{config.host}:{config.port}/{config.database_name}"
         query = text("SELECT table_name FROM information_schema.tables WHERE table_schema='public'")
     else:
         raise HTTPException(status_code=400, detail="Unsupported database type.")
@@ -111,7 +119,6 @@ def list_external_tables(
         temp_engine = create_engine(uri, connect_args={"connect_timeout": 5} if config.db_type.lower() == "mysql" else {})
         with temp_engine.connect() as conn:
             result = conn.execute(query)
-            # Flatten the database rows into a clean array of strings
             tables = [row[0] for row in result]
         temp_engine.dispose()
         return tables

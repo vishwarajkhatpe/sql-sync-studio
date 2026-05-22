@@ -2,7 +2,6 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
-
 # Grab the URL from Render (or use localhost fallback)
 raw_url = os.getenv(
     "DATABASE_URL", 

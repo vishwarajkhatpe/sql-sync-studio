@@ -11,6 +11,7 @@ from app.models import db_config as db_model
 from app.models import extracted_payload as payload_model
 from app.api.deps import get_current_user
 from app.models import user as user_model
+from app.core.security import encrypt_db_password, decrypt_db_password
 
 router = APIRouter(prefix="/sync", tags=["Sync Pipeline Manager"])
 
@@ -93,10 +94,17 @@ def extract_table_data(
     if not config or config.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access Denied.")
 
+    # ---> NEW: SECURE TWO-WAY DECRYPTION IN MEMORY <---
+    try:
+        real_password = decrypt_db_password(config.password)
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail="Security Fault: Unable to decrypt database credentials.")
+
+    # Use the decrypted password for the connection URI
     if config.db_type.lower() == "mysql":
-        uri = f"mysql+pymysql://{config.username}:{config.password}@{config.host}:{config.port}/{config.database_name}"
+        uri = f"mysql+pymysql://{config.username}:{real_password}@{config.host}:{config.port}/{config.database_name}"
     elif config.db_type.lower() == "postgresql":
-        uri = f"postgresql+psycopg2://{config.username}:{config.password}@{config.host}:{config.port}/{config.database_name}"
+        uri = f"postgresql+psycopg2://{config.username}:{real_password}@{config.host}:{config.port}/{config.database_name}"
     else:
         raise HTTPException(status_code=400, detail="Unsupported database engine architecture.")
 
