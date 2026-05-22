@@ -2,10 +2,8 @@ import axios from 'axios';
 
 // Create a centralized Axios instance with predefined settings
 const API = axios.create({
-    baseURL: 'http://localhost:8000', // Our FastAPI local server URL
-    headers: {
-        'Content-Type': 'application/json',
-    },
+    // Vite uses import.meta.env to read environment variables
+    baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000',
 });
 
 // An interceptor is like an automated middleware. This code runs BEFORE every single

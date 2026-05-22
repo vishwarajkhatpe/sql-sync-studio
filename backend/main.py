@@ -30,7 +30,7 @@ def startup_event():
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["*"], # Allow any frontend to talk to this API for MVP testing
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
