@@ -1,25 +1,21 @@
-from sqlalchemy import create_engine
-from sqlalchemy.orm import declarative_base, sessionmaker
 import os
-from dotenv import load_dotenv
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.declarative import declarative_base
 
-# Load the variables from our .env file
-load_dotenv()
+# 1. Look for the Render Cloud URL first. 
+# 2. If it's not found (like when you are on your laptop), default to localhost!
+SQLALCHEMY_DATABASE_URL = os.getenv(
+    "DATABASE_URL", 
+    "mysql+pymysql://root:admin@127.0.0.1:3306/saas_platform" 
+)
 
-# Get the URL from the environment
-SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
-
-# Create the SQLAlchemy Engine. This is the core interface to the database.
+# Create the SQLAlchemy engine
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 
-# Create a SessionLocal class. Each instance of this will be an actual database session.
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# Base class for our models. We will inherit from this to create our database tables.
 Base = declarative_base()
 
-# Dependency function. This yields a database session for a single API request, 
-# and automatically closes it when the request is finished.
 def get_db():
     db = SessionLocal()
     try:
