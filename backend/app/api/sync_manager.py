@@ -9,9 +9,12 @@ from app.schemas import sync_rule as schema
 from app.models import sync_rule as model
 from app.models import db_config as db_model
 from app.models import extracted_payload as payload_model
+from app.models import sync_log as log_model
+from app.schemas import sync_log as log_schema
 from app.api.deps import get_current_user
 from app.models import user as user_model
 from app.core.security import encrypt_db_password, decrypt_db_password
+from sqlalchemy.sql import func
 
 router = APIRouter(prefix="/sync", tags=["Sync Pipeline Manager"])
 
@@ -108,6 +111,22 @@ def extract_table_data(
     else:
         raise HTTPException(status_code=400, detail="Unsupported database engine architecture.")
 
+    rule = db.query(model.SyncRule).filter(
+        model.SyncRule.config_id == config_id,
+        model.SyncRule.table_name == table_name
+    ).first()
+    rule_id = rule.id if rule else None
+
+    log_entry = log_model.SyncLog(
+        rule_id=rule_id,
+        config_id=config_id,
+        table_name=table_name,
+        status="started"
+    )
+    db.add(log_entry)
+    db.commit()
+    db.refresh(log_entry)
+
     try:
         # 1. EXTRACT: Pull the raw data
         temp_engine = create_engine(uri, connect_args={"connect_timeout": 5} if config.db_type.lower() == "mysql" else {})
@@ -128,6 +147,10 @@ def extract_table_data(
             raw_data={"records": clean_records} 
         )
         db.add(snapshot)
+        
+        log_entry.status = "success"
+        log_entry.record_count = len(clean_records)
+        log_entry.completed_at = func.now()
         db.commit()
         db.refresh(snapshot)
         
@@ -142,6 +165,10 @@ def extract_table_data(
         
     except Exception as e:
         db.rollback()
+        log_entry.status = "failed"
+        log_entry.error_message = str(e)
+        log_entry.completed_at = func.now()
+        db.commit()
         raise HTTPException(status_code=400, detail=f"Extraction & Ingestion failed: {str(e)}")
 
 @router.get("/{config_id}/history")
@@ -155,23 +182,38 @@ def get_extraction_history(
     if not config or config.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access Denied.")
 
-    recent_snapshots = db.query(payload_model.ExtractedPayload)\
-        .filter(payload_model.ExtractedPayload.config_id == config_id)\
-        .order_by(desc(payload_model.ExtractedPayload.extracted_at))\
+    recent_logs = db.query(log_model.SyncLog)\
+        .filter(log_model.SyncLog.config_id == config_id)\
+        .order_by(desc(log_model.SyncLog.started_at))\
         .limit(10).all()
 
     history = []
-    for snap in recent_snapshots:
-        record_count = len(snap.raw_data.get("records", [])) if isinstance(snap.raw_data, dict) else 0
-        
+    for log in recent_logs:
         history.append({
-            "id": snap.id,
-            "table_name": snap.table_name,
-            "record_count": record_count,
-            "extracted_at": snap.extracted_at
+            "id": log.id,
+            "table_name": log.table_name,
+            "record_count": log.record_count,
+            "extracted_at": log.started_at,
+            "status": log.status
         })
 
     return {"status": "success", "history": history}
+
+@router.get("/{config_id}/logs", response_model=list[log_schema.SyncLogResponse])
+def get_sync_logs(
+    config_id: int,
+    db: Session = Depends(get_db),
+    current_user: user_model.User = Depends(get_current_user)
+):
+    """Fetches all sync logs."""
+    config = db.query(db_model.DatabaseConfig).filter(db_model.DatabaseConfig.id == config_id).first()
+    if not config or config.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access Denied.")
+
+    logs = db.query(log_model.SyncLog).filter(
+        log_model.SyncLog.config_id == config_id
+    ).order_by(desc(log_model.SyncLog.started_at)).limit(50).all()
+    return logs
 
 @router.delete("/{config_id}/rules/{rule_id}")
 def delete_sync_rule(

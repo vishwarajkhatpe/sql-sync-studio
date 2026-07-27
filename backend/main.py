@@ -17,6 +17,7 @@ from app.models import user as user_model
 from app.models import db_config as db_config_model
 from app.models import sync_rule as sync_rule_model # Registering the Sync Rule Model
 from app.models import extracted_payload as payload_model # Registering the Extracted Payload Model
+from app.models import sync_log as sync_log_model # Registering the Sync Log Model
 
 # Create tables
 Base.metadata.create_all(bind=engine)

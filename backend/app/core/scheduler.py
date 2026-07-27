@@ -2,10 +2,11 @@ import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import create_engine, text
 from decimal import Decimal
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from app.db.database import SessionLocal
-from app.models import sync_rule, db_config, extracted_payload
+from app.models import sync_rule, db_config, extracted_payload, sync_log
 from app.core.security import decrypt_db_password
+from sqlalchemy.sql import func
 
 def sanitize_record(record: dict) -> dict:
     sanitized = {}
@@ -33,7 +34,10 @@ def execute_automated_pipeline():
     db = SessionLocal()
     try:
         # Find all rules where the user turned on the sync pipeline
-        active_rules = db.query(sync_rule.SyncRule).filter(sync_rule.SyncRule.is_active == True).all()
+        active_rules = db.query(sync_rule.SyncRule).filter(
+            sync_rule.SyncRule.is_active == True,
+            sync_rule.SyncRule.sync_frequency != "manual"
+        ).all()
         
         if not active_rules:
             logger.info("No active rules found. Going back to sleep.")
@@ -45,13 +49,42 @@ def execute_automated_pipeline():
             if not config:
                 continue
 
+            last_log = db.query(sync_log.SyncLog).filter(
+                sync_log.SyncLog.rule_id == rule.id,
+                sync_log.SyncLog.status == "success"
+            ).order_by(sync_log.SyncLog.started_at.desc()).first()
+
+            now = datetime.now(timezone.utc)
+            if last_log and last_log.started_at:
+                last_time = last_log.started_at
+                if last_time.tzinfo is None:
+                    last_time = last_time.replace(tzinfo=timezone.utc)
+                if rule.sync_frequency == "hourly" and (now - last_time) < timedelta(hours=1):
+                    continue
+                if rule.sync_frequency == "daily" and (now - last_time) < timedelta(days=1):
+                    continue
+
             logger.info(f"Starting automated sync for table: {rule.table_name}")
+            
+            log_entry = sync_log.SyncLog(
+                rule_id=rule.id,
+                config_id=config.id,
+                table_name=rule.table_name,
+                status="started"
+            )
+            db.add(log_entry)
+            db.commit()
+            db.refresh(log_entry)
 
             # Build the dynamic connection URI
             try:
                 real_password = decrypt_db_password(config.password)
             except Exception as e:
                 logger.error(f"Failed to decrypt password for config {config.id}: {e}")
+                log_entry.status = "failed"
+                log_entry.error_message = str(e)
+                log_entry.completed_at = func.now()
+                db.commit()
                 continue
 
             if config.db_type.lower() == "mysql":
@@ -78,11 +111,20 @@ def execute_automated_pipeline():
                     raw_data={"records": clean_records}
                 )
                 db.add(snapshot)
+                
+                log_entry.status = "success"
+                log_entry.record_count = len(extracted_records)
+                log_entry.completed_at = func.now()
                 db.commit()
                 
                 logger.info(f"SUCCESS: Saved {len(extracted_records)} records from '{rule.table_name}' to the Data Lake.")
             
             except Exception as e:
+                db.rollback()
+                log_entry.status = "failed"
+                log_entry.error_message = str(e)
+                log_entry.completed_at = func.now()
+                db.commit()
                 logger.error(f"FAILED to sync '{rule.table_name}': {str(e)}")
 
     finally:
