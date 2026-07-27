@@ -172,3 +172,27 @@ def get_extraction_history(
         })
 
     return {"status": "success", "history": history}
+
+@router.delete("/{config_id}/rules/{rule_id}")
+def delete_sync_rule(
+    config_id: int,
+    rule_id: int,
+    db: Session = Depends(get_db),
+    current_user: user_model.User = Depends(get_current_user)
+):
+    """Deletes a synchronization rule."""
+    config = db.query(db_model.DatabaseConfig).filter(db_model.DatabaseConfig.id == config_id).first()
+    if not config or config.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access Denied.")
+
+    rule = db.query(model.SyncRule).filter(
+        model.SyncRule.id == rule_id,
+        model.SyncRule.config_id == config_id
+    ).first()
+    
+    if not rule:
+        raise HTTPException(status_code=404, detail="Sync rule not found.")
+        
+    db.delete(rule)
+    db.commit()
+    return {"status": "success", "message": "Sync rule deleted."}

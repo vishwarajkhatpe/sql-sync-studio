@@ -7,7 +7,7 @@ class ExtractedPayload(Base):
     __tablename__ = "extracted_payloads"
 
     id = Column(Integer, primary_key=True, index=True)
-    config_id = Column(Integer, ForeignKey("database_configs.id"), nullable=False)
+    config_id = Column(Integer, ForeignKey("database_configs.id", ondelete="CASCADE"), nullable=False)
     table_name = Column(String(255), nullable=False)
     
     # Native JSON Storage Column: This acts as our internal data lake vault,
@@ -18,4 +18,4 @@ class ExtractedPayload(Base):
     extracted_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     # Relational linkage back to the workspace configuration profile
-    db_config = relationship("DatabaseConfig")
+    db_config = relationship("DatabaseConfig", back_populates="payloads")

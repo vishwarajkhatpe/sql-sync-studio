@@ -127,3 +127,61 @@ def list_external_tables(
             status_code=400, 
             detail=f"Failed to fetch external tables: {str(e)}"
         )
+
+@router.get("/", response_model=list[db_schema.DatabaseConfigResponse])
+def get_user_databases(
+    db: Session = Depends(get_db),
+    current_user: user_model.User = Depends(get_current_user)
+):
+    """List all saved connections for the current user."""
+    configs = db.query(db_config_model.DatabaseConfig).filter(
+        db_config_model.DatabaseConfig.user_id == current_user.id
+    ).all()
+    return configs
+
+@router.put("/{config_id}", response_model=db_schema.DatabaseConfigResponse)
+def update_database_config(
+    config_id: int,
+    config_update: db_schema.DatabaseConfigUpdate,
+    db: Session = Depends(get_db),
+    current_user: user_model.User = Depends(get_current_user)
+):
+    """Update connection details (re-encrypt password if changed)."""
+    db_config = db.query(db_config_model.DatabaseConfig).filter(
+        db_config_model.DatabaseConfig.id == config_id,
+        db_config_model.DatabaseConfig.user_id == current_user.id
+    ).first()
+    
+    if not db_config:
+        raise HTTPException(status_code=404, detail="Database configuration not found.")
+        
+    update_data = config_update.dict(exclude_unset=True)
+    
+    if "password" in update_data:
+        update_data["password"] = encrypt_db_password(update_data["password"])
+        
+    for key, value in update_data.items():
+        setattr(db_config, key, value)
+        
+    db.commit()
+    db.refresh(db_config)
+    return db_config
+
+@router.delete("/{config_id}")
+def delete_database_config(
+    config_id: int,
+    db: Session = Depends(get_db),
+    current_user: user_model.User = Depends(get_current_user)
+):
+    """Delete connection + cascade delete sync rules & payloads."""
+    db_config = db.query(db_config_model.DatabaseConfig).filter(
+        db_config_model.DatabaseConfig.id == config_id,
+        db_config_model.DatabaseConfig.user_id == current_user.id
+    ).first()
+    
+    if not db_config:
+        raise HTTPException(status_code=404, detail="Database configuration not found.")
+        
+    db.delete(db_config)
+    db.commit()
+    return {"status": "success", "message": "Database configuration deleted."}
