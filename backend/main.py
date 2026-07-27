@@ -33,7 +33,9 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
+raw_origins = os.getenv("ALLOWED_ORIGINS") or os.getenv("CORS_ORIGINS") or "http://localhost:5173,https://sql-sync-studio.vercel.app"
+origins = [o.strip() for o in raw_origins.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins, # Restrict origins based on environment
