@@ -18,13 +18,14 @@ elif clean_url.startswith("postgres://"):
 elif clean_url.startswith("postgresql://") and not clean_url.startswith("postgresql+psycopg2://"):
     clean_url = clean_url.replace("postgresql://", "postgresql+psycopg2://", 1)
 
-# Intercept Aiven's strict SSL requirement and translate it for PyMySQL
-if "?ssl-mode=REQUIRED" in clean_url or "&ssl-mode=REQUIRED" in clean_url:
-    clean_url = clean_url.replace("?ssl-mode=REQUIRED", "").replace("&ssl-mode=REQUIRED", "")
-    connect_args["ssl"] = {}  # This natively tells PyMySQL to activate SSL
-elif "?sslmode=require" in clean_url or "&sslmode=require" in clean_url:
-    clean_url = clean_url.replace("?sslmode=require", "").replace("&sslmode=require", "")
-    connect_args["ssl"] = {}
+# Intercept MySQL strict SSL requirement and translate it for PyMySQL
+if clean_url.startswith("mysql"):
+    if "?ssl-mode=REQUIRED" in clean_url or "&ssl-mode=REQUIRED" in clean_url:
+        clean_url = clean_url.replace("?ssl-mode=REQUIRED", "").replace("&ssl-mode=REQUIRED", "")
+        connect_args["ssl"] = {}  # This natively tells PyMySQL to activate SSL
+    elif "?sslmode=require" in clean_url or "&sslmode=require" in clean_url:
+        clean_url = clean_url.replace("?sslmode=require", "").replace("&sslmode=require", "")
+        connect_args["ssl"] = {}
 
 if clean_url.startswith("sqlite"):
     connect_args["check_same_thread"] = False
