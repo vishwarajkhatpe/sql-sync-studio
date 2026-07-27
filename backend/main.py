@@ -39,6 +39,7 @@ origins = [o.strip() for o in raw_origins.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins, # Restrict origins based on environment
+    allow_origin_regex=r"https://.*\.vercel\.app|http://localhost:.*", # Accept any Vercel preview branch
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
