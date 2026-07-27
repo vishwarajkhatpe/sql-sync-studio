@@ -51,6 +51,7 @@ def create_sync_rule(
         existing_rule.sync_frequency = rule_data.sync_frequency
         existing_rule.sync_strategy = rule_data.sync_strategy
         existing_rule.is_active = rule_data.is_active
+        existing_rule.selected_columns = rule_data.selected_columns
         db.commit()
         db.refresh(existing_rule)
         return existing_rule
@@ -60,7 +61,8 @@ def create_sync_rule(
         table_name=rule_data.table_name,
         sync_frequency=rule_data.sync_frequency,
         sync_strategy=rule_data.sync_strategy,
-        is_active=rule_data.is_active
+        is_active=rule_data.is_active,
+        selected_columns=rule_data.selected_columns
     )
     db.add(new_rule)
     db.commit()
@@ -85,6 +87,8 @@ def get_workspace_sync_rules(
 def extract_table_data(
     config_id: int,
     table_name: str,
+    page: int = 1,
+    page_size: int = 100,
     db: Session = Depends(get_db),
     current_user: user_model.User = Depends(get_current_user)
 ):
@@ -131,10 +135,26 @@ def extract_table_data(
         # 1. EXTRACT: Pull the raw data
         temp_engine = create_engine(uri, connect_args={"connect_timeout": 5} if config.db_type.lower() == "mysql" else {})
         with temp_engine.connect() as conn:
-            query = text(f"SELECT * FROM `{table_name}`" if config.db_type.lower() == "mysql" else f'SELECT * FROM "{table_name}"')
-            result = conn.execute(query)
+            col_clause = "*"
+            if rule and rule.selected_columns:
+                if config.db_type.lower() == "mysql":
+                    col_clause = ", ".join([f"`{c}`" for c in rule.selected_columns])
+                else:
+                    col_clause = ", ".join([f'"{c}"' for c in rule.selected_columns])
+                    
+            if config.db_type.lower() == "mysql":
+                query_str = f"SELECT {col_clause} FROM `{table_name}` LIMIT :limit OFFSET :offset"
+                count_query = text(f"SELECT COUNT(*) FROM `{table_name}`")
+            else:
+                query_str = f'SELECT {col_clause} FROM "{table_name}" LIMIT :limit OFFSET :offset'
+                count_query = text(f'SELECT COUNT(*) FROM "{table_name}"')
+                
+            query = text(query_str)
+            result = conn.execute(query, {"limit": page_size, "offset": (page - 1) * page_size})
             columns = result.keys()
             raw_records = [dict(zip(columns, row)) for row in result]
+            
+            total_count = conn.execute(count_query).scalar()
         temp_engine.dispose()
         
         # ---> SANITIZE THE RECORDS FOR JSON <---
@@ -160,6 +180,10 @@ def extract_table_data(
             "snapshot_id": snapshot.id,
             "table": table_name,
             "record_count": len(clean_records),
+            "total_count": total_count,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": (total_count + page_size - 1) // page_size,
             "data": clean_records
         }
         

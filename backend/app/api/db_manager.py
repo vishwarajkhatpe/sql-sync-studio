@@ -185,3 +185,43 @@ def delete_database_config(
     db.delete(db_config)
     db.commit()
     return {"status": "success", "message": "Database configuration deleted."}
+
+@router.get("/{config_id}/tables/{table_name}/columns", response_model=list[str])
+def list_table_columns(
+    config_id: int,
+    table_name: str,
+    db: Session = Depends(get_db),
+    current_user: user_model.User = Depends(get_current_user)
+):
+    """Return column names for a specific table."""
+    config = db.query(db_config_model.DatabaseConfig).filter(
+        db_config_model.DatabaseConfig.id == config_id,
+        db_config_model.DatabaseConfig.user_id == current_user.id
+    ).first()
+    
+    if not config:
+        raise HTTPException(status_code=404, detail="Database configuration not found.")
+        
+    try:
+        real_password = decrypt_db_password(config.password)
+    except ValueError:
+        raise HTTPException(status_code=500, detail="Security Fault: Unable to decrypt database credentials.")
+
+    if config.db_type.lower() == "mysql":
+        uri = f"mysql+pymysql://{config.username}:{real_password}@{config.host}:{config.port}/{config.database_name}"
+        query = text(f"SHOW COLUMNS FROM `{table_name}`")
+    elif config.db_type.lower() == "postgresql":
+        uri = f"postgresql+psycopg2://{config.username}:{real_password}@{config.host}:{config.port}/{config.database_name}"
+        query = text(f"SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='{table_name}'")
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported database type.")
+
+    try:
+        temp_engine = create_engine(uri, connect_args={"connect_timeout": 5} if config.db_type.lower() == "mysql" else {})
+        with temp_engine.connect() as conn:
+            result = conn.execute(query)
+            columns = [row[0] for row in result]
+        temp_engine.dispose()
+        return columns
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to fetch external columns: {str(e)}")

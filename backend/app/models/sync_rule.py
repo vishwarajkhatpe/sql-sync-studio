@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, ForeignKey, Boolean, JSON
 from sqlalchemy.orm import relationship
 from app.db.database import Base
 
@@ -11,6 +11,7 @@ class SyncRule(Base):
     sync_frequency = Column(String(50), nullable=False)  # 'manual', 'realtime', 'hourly', 'daily'
     sync_strategy = Column(String(50), nullable=False)   # 'full_load', 'incremental'
     is_active = Column(Boolean, default=True)
+    selected_columns = Column(JSON, nullable=True)
 
     # Establish relationship back to the parent database configuration
     db_config = relationship("DatabaseConfig", back_populates="sync_rules")
