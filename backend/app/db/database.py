@@ -1,7 +1,6 @@
 import os
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, DeclarativeBase
 # Grab the URL from Render (or use localhost fallback)
 raw_url = os.getenv(
     "DATABASE_URL", 
@@ -20,7 +19,8 @@ if "?ssl-mode=REQUIRED" in raw_url:
 engine = create_engine(clean_url, connect_args=connect_args)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
+class Base(DeclarativeBase):
+    pass
 
 def get_db():
     db = SessionLocal()

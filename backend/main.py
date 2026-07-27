@@ -2,6 +2,8 @@ from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from fastapi.middleware.cors import CORSMiddleware
+import os
+from contextlib import asynccontextmanager
 
 # Import database and routers
 from app.db.database import get_db, engine, Base
@@ -19,18 +21,21 @@ from app.models import extracted_payload as payload_model # Registering the Extr
 # Create tables
 Base.metadata.create_all(bind=engine)
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    start_scheduler()
+    yield
+
 app = FastAPI(
     title="SQL Sync Studio API",
-    description="Backend for the SaaS Sandbox Platform"
+    description="Backend for the SaaS Sandbox Platform",
+    lifespan=lifespan
 )
 
-@app.on_event("startup")
-def startup_event():
-    start_scheduler()
-
+origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Allow any frontend to talk to this API for MVP testing
+    allow_origins=origins, # Restrict origins based on environment
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -5,6 +5,7 @@ from decimal import Decimal
 from datetime import date, datetime
 from app.db.database import SessionLocal
 from app.models import sync_rule, db_config, extracted_payload
+from app.core.security import decrypt_db_password
 
 def sanitize_record(record: dict) -> dict:
     sanitized = {}
@@ -47,10 +48,16 @@ def execute_automated_pipeline():
             logger.info(f"Starting automated sync for table: {rule.table_name}")
 
             # Build the dynamic connection URI
+            try:
+                real_password = decrypt_db_password(config.password)
+            except Exception as e:
+                logger.error(f"Failed to decrypt password for config {config.id}: {e}")
+                continue
+
             if config.db_type.lower() == "mysql":
-                uri = f"mysql+pymysql://{config.username}:{config.password}@{config.host}:{config.port}/{config.database_name}"
+                uri = f"mysql+pymysql://{config.username}:{real_password}@{config.host}:{config.port}/{config.database_name}"
             else:
-                uri = f"postgresql+psycopg2://{config.username}:{config.password}@{config.host}:{config.port}/{config.database_name}"
+                uri = f"postgresql+psycopg2://{config.username}:{real_password}@{config.host}:{config.port}/{config.database_name}"
 
             try:
                 # 1. EXTRACT
@@ -62,7 +69,7 @@ def execute_automated_pipeline():
                     extracted_records = [dict(zip(columns, row)) for row in result]
                 temp_engine.dispose()
                 
-                clean_records = [sanitize_record(record) for record in raw_records]
+                clean_records = [sanitize_record(record) for record in extracted_records]
 
                 # 2. INGEST
                 snapshot = extracted_payload.ExtractedPayload(
