@@ -28,12 +28,14 @@ export const AuthProvider = ({ children }) => {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
         });
 
-        const { access_token } = response.data;
+        const { access_token, refresh_token } = response.data;
         localStorage.setItem('token', access_token);
+        localStorage.setItem('refresh_token', refresh_token);
 
-        const userObj = { email };
-        localStorage.setItem('user', JSON.stringify(userObj));
-        setUser(userObj);
+        // Fetch actual profile from backend
+        const profileRes = await API.get('/auth/me', { headers: { Authorization: `Bearer ${access_token}` } });
+        localStorage.setItem('user', JSON.stringify(profileRes.data));
+        setUser(profileRes.data);
         return response.data;
     };
 
@@ -46,12 +48,22 @@ export const AuthProvider = ({ children }) => {
     // Action: Log Out
     const logout = () => {
         localStorage.removeItem('token');
+        localStorage.removeItem('refresh_token');
         localStorage.removeItem('user');
         setUser(null);
     };
 
+    // Action: Change Password
+    const changePassword = async (oldPassword, newPassword) => {
+        const response = await API.post('/auth/change-password', {
+            old_password: oldPassword,
+            new_password: newPassword
+        });
+        return response.data;
+    };
+
     return (
-        <AuthContext.Provider value={{ user, login, register, logout, loading }}>
+        <AuthContext.Provider value={{ user, login, register, logout, changePassword, loading }}>
             {!loading && children}
         </AuthContext.Provider>
     );

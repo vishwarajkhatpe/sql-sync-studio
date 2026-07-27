@@ -1,5 +1,6 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
+import { Link } from 'react-router-dom';
 
 export default function Navbar() {
     const { user, logout } = useAuth();
@@ -21,10 +22,10 @@ export default function Navbar() {
                         </span>
                     </div>
                     <div className="flex items-center space-x-6">
-                        <div className="flex items-center space-x-2 bg-slate-800/80 px-3 py-1.5 rounded-full border border-slate-700">
-                            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]"></div>
-                            <span className="text-sm text-slate-300 font-medium">{user?.email}</span>
-                        </div>
+                        <Link to="/profile" className="flex items-center space-x-2 bg-slate-800/80 px-3 py-1.5 rounded-full border border-slate-700 hover:bg-slate-700 hover:border-blue-500/50 transition-all cursor-pointer group">
+                            <div className="w-2 h-2 rounded-full bg-emerald-400 group-hover:animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]"></div>
+                            <span className="text-sm text-slate-300 font-medium group-hover:text-white transition-colors">{user?.email}</span>
+                        </Link>
                         <button
                             onClick={logout}
                             className="px-4 py-2 border border-slate-700 text-xs font-semibold rounded-lg text-slate-300 bg-slate-800 hover:bg-slate-700 hover:text-white transition-all duration-200 cursor-pointer shadow-md active:scale-95"
