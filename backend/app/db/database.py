@@ -26,6 +26,9 @@ elif "?sslmode=require" in clean_url or "&sslmode=require" in clean_url:
     clean_url = clean_url.replace("?sslmode=require", "").replace("&sslmode=require", "")
     connect_args["ssl"] = {}
 
+if clean_url.startswith("sqlite"):
+    connect_args["check_same_thread"] = False
+
 # Boot the engine with the cleaned URL and proper SSL arguments
 engine = create_engine(clean_url, connect_args=connect_args)
 
