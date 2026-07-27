@@ -101,7 +101,7 @@ export default function SyncConfigModal({
                                 value={syncStrategy} onChange={(e) => setSyncStrategy(e.target.value)}
                             >
                                 <option value="full_load">Full Overwrite Extract</option>
-                                <option value="incremental" disabled>Incremental Delta Sync (Pro)</option>
+                                <option value="incremental">Incremental Delta Sync</option>
                             </select>
                         </div>
                     </div>

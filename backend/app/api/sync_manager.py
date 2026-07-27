@@ -3,6 +3,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy import create_engine, text, desc
 from decimal import Decimal
 from datetime import date, datetime
+import csv
+import io
+import json
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from app.db.database import get_db
 from app.schemas import sync_rule as schema
@@ -262,3 +267,89 @@ def delete_sync_rule(
     db.delete(rule)
     db.commit()
     return {"status": "success", "message": "Sync rule deleted."}
+
+class CustomSQLQuery(BaseModel):
+    query: str
+
+@router.get("/{config_id}/export/{table_name}/{format}")
+def export_table_data(
+    config_id: int,
+    table_name: str,
+    format: str,
+    db: Session = Depends(get_db),
+    current_user: user_model.User = Depends(get_current_user)
+):
+    """Exports the latest snapshot data for a table in CSV or JSON format."""
+    config = db.query(db_model.DatabaseConfig).filter(db_model.DatabaseConfig.id == config_id).first()
+    if not config or config.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access Denied.")
+
+    snapshot = db.query(payload_model.ExtractedPayload).filter(
+        payload_model.ExtractedPayload.config_id == config_id,
+        payload_model.ExtractedPayload.table_name == table_name
+    ).order_by(desc(payload_model.ExtractedPayload.extracted_at)).first()
+
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="No extracted data found for export.")
+
+    records = snapshot.raw_data.get("records", [])
+    
+    if format.lower() == 'json':
+        data_str = json.dumps(records, indent=2)
+        return StreamingResponse(
+            iter([data_str]), 
+            media_type="application/json",
+            headers={"Content-Disposition": f"attachment; filename={table_name}.json"}
+        )
+    elif format.lower() == 'csv':
+        output = io.StringIO()
+        if records:
+            writer = csv.DictWriter(output, fieldnames=records[0].keys())
+            writer.writeheader()
+            writer.writerows(records)
+        return StreamingResponse(
+            iter([output.getvalue()]), 
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={table_name}.csv"}
+        )
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported format. Use 'csv' or 'json'.")
+
+@router.post("/{config_id}/custom-sql")
+def execute_custom_sql(
+    config_id: int,
+    request: CustomSQLQuery,
+    db: Session = Depends(get_db),
+    current_user: user_model.User = Depends(get_current_user)
+):
+    """Executes a custom SELECT query securely on the target database."""
+    config = db.query(db_model.DatabaseConfig).filter(db_model.DatabaseConfig.id == config_id).first()
+    if not config or config.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access Denied.")
+
+    # Validate query safely
+    if not request.query.strip().lower().startswith("select"):
+        raise HTTPException(status_code=400, detail="Only SELECT queries are allowed.")
+
+    try:
+        real_password = decrypt_db_password(config.password)
+    except ValueError:
+        raise HTTPException(status_code=500, detail="Security Fault.")
+
+    if config.db_type.lower() == "mysql":
+        uri = f"mysql+pymysql://{config.username}:{real_password}@{config.host}:{config.port}/{config.database_name}"
+    elif config.db_type.lower() == "postgresql":
+        uri = f"postgresql+psycopg2://{config.username}:{real_password}@{config.host}:{config.port}/{config.database_name}"
+    
+    try:
+        engine = create_engine(uri, connect_args={"connect_timeout": 5} if config.db_type.lower() == "mysql" else {})
+        with engine.connect() as conn:
+            result = conn.execute(text(request.query))
+            columns = result.keys()
+            raw_records = [dict(zip(columns, row)) for row in result]
+        engine.dispose()
+        
+        clean_records = [sanitize_record(record) for record in raw_records]
+        return {"status": "success", "data": clean_records}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Query Execution Failed: {str(e)}")

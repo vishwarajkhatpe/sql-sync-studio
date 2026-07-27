@@ -1,4 +1,5 @@
 import React from 'react';
+import ExportData from './ExportData';
 
 export default function DataGrid({ 
     data, 
@@ -23,7 +24,8 @@ export default function DataGrid({
                 </div>
                 {selectedTable && pagination && (
                     <div className="flex items-center gap-4">
-                        <span className="text-xs font-bold bg-slate-800 border border-slate-700 text-slate-300 px-3 py-1 rounded-md">
+                        <ExportData activeConfigId={pagination.activeConfigId || ''} tableName={selectedTable} />
+                        <span className="text-xs font-bold bg-slate-800 border border-slate-700 text-slate-300 px-3 py-1.5 rounded-md">
                             Total Records: {pagination.total_count}
                         </span>
                     </div>

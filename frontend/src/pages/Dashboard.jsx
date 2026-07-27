@@ -6,6 +6,7 @@ import SchemaExplorer from '../components/SchemaExplorer';
 import DataGrid from '../components/DataGrid';
 import TelemetryPanel from '../components/TelemetryPanel';
 import SyncConfigModal from '../components/SyncConfigModal';
+import CustomSQL from '../components/CustomSQL';
 import API from '../services/api';
 
 export default function Dashboard() {
@@ -31,6 +32,9 @@ export default function Dashboard() {
     // Modal State
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [modalTable, setModalTable] = useState('');
+    
+    // Tab State
+    const [activeTab, setActiveTab] = useState('grid'); // 'grid' or 'sql'
 
     useEffect(() => {
         loadDatabases();
@@ -97,7 +101,8 @@ export default function Dashboard() {
             setPagination({
                 page: response.data.page,
                 total_pages: response.data.total_pages,
-                total_count: response.data.total_count
+                total_count: response.data.total_count,
+                activeConfigId: activeConfigId
             });
             // Refresh telemetry after manual extraction
             loadTelemetry(activeConfigId);
@@ -179,15 +184,35 @@ export default function Dashboard() {
                                 </div>
                             </div>
                             
-                            {/* Right Column: Data Grid */}
-                            <div className="flex-1 min-w-[500px]">
-                                <DataGrid 
-                                    data={extractedData}
-                                    loading={extractionLoading}
-                                    selectedTable={selectedTable}
-                                    pagination={pagination}
-                                    onPageChange={(p) => handleTriggerExtraction(selectedTable, p)}
-                                />
+                            {/* Right Column: Data Grid / Custom SQL */}
+                            <div className="flex-1 min-w-[500px] flex flex-col h-full">
+                                <div className="flex border-b border-slate-800 mb-4 pb-0 z-20 relative">
+                                    <button 
+                                        className={`px-6 py-3 font-bold text-sm border-b-2 transition-colors ${activeTab === 'grid' ? 'border-blue-500 text-white' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
+                                        onClick={() => setActiveTab('grid')}
+                                    >
+                                        Live Extraction Grid
+                                    </button>
+                                    <button 
+                                        className={`px-6 py-3 font-bold text-sm border-b-2 transition-colors ${activeTab === 'sql' ? 'border-purple-500 text-white' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
+                                        onClick={() => setActiveTab('sql')}
+                                    >
+                                        Custom SQL Console
+                                    </button>
+                                </div>
+                                <div className="flex-1 min-h-0 relative z-20">
+                                    {activeTab === 'grid' ? (
+                                        <DataGrid 
+                                            data={extractedData}
+                                            loading={extractionLoading}
+                                            selectedTable={selectedTable}
+                                            pagination={pagination}
+                                            onPageChange={(p) => handleTriggerExtraction(selectedTable, p)}
+                                        />
+                                    ) : (
+                                        <CustomSQL activeConfigId={activeConfigId} />
+                                    )}
+                                </div>
                             </div>
                         </div>
                     )}

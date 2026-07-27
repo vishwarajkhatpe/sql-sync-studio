@@ -96,7 +96,35 @@ def execute_automated_pipeline():
                 # 1. EXTRACT
                 temp_engine = create_engine(uri, connect_args={"connect_timeout": 5} if config.db_type.lower() == "mysql" else {})
                 with temp_engine.connect() as conn:
-                    query = text(f"SELECT * FROM `{rule.table_name}`" if config.db_type.lower() == "mysql" else f'SELECT * FROM "{rule.table_name}"')
+                    col_clause = "*"
+                    if rule.selected_columns:
+                        if config.db_type.lower() == "mysql":
+                            col_clause = ", ".join([f"`{c}`" for c in rule.selected_columns])
+                        else:
+                            col_clause = ", ".join([f'"{c}"' for c in rule.selected_columns])
+                    
+                    incremental_clause = ""
+                    if rule.sync_strategy == "incremental":
+                        last_snapshot = db.query(extracted_payload.ExtractedPayload).filter(
+                            extracted_payload.ExtractedPayload.config_id == config.id,
+                            extracted_payload.ExtractedPayload.table_name == rule.table_name
+                        ).order_by(extracted_payload.ExtractedPayload.extracted_at.desc()).first()
+                        
+                        if last_snapshot and "records" in last_snapshot.raw_data and last_snapshot.raw_data["records"]:
+                            records = last_snapshot.raw_data["records"]
+                            if records and "id" in records[0]:
+                                max_id = max([r.get("id", 0) for r in records if isinstance(r.get("id"), (int, float))], default=0)
+                                if config.db_type.lower() == "mysql":
+                                    incremental_clause = f" WHERE `id` > {max_id}"
+                                else:
+                                    incremental_clause = f' WHERE "id" > {max_id}'
+
+                    if config.db_type.lower() == "mysql":
+                        query_str = f"SELECT {col_clause} FROM `{rule.table_name}`{incremental_clause}"
+                    else:
+                        query_str = f'SELECT {col_clause} FROM "{rule.table_name}"{incremental_clause}'
+                        
+                    query = text(query_str)
                     result = conn.execute(query)
                     columns = result.keys()
                     extracted_records = [dict(zip(columns, row)) for row in result]
